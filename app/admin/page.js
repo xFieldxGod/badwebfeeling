@@ -753,84 +753,100 @@ export default function AdminPage() {
         }
         const winnerTeam =
           fromMatch.winner === "A" ? fromMatch.teamA : fromMatch.teamB;
-        if (!winnerTeam || winnerTeam.length !== 2) {
-          alert("ทีมชนะต้องมี 2 คน");
+
+        if (!winnerTeam || winnerTeam.length === 0) {
+          alert("ทีมชนะไม่มีผู้เล่น");
+          return;
+        }
+        // สมมติว่าทีมที่ชนะต้องมี 2 คนเสมอสำหรับประเภทคู่
+        if (winnerTeam.length !== 2) {
+          alert("ทีมชนะต้องมี 2 คนเพื่อส่งต่อไปยังแมตช์ถัดไป");
           return;
         }
 
-        const currentMatchIndex = matches.findIndex(
-          (m) => m.id === fromMatch.id
+        // ตรรกะใหม่ในการค้นหาแมตช์ที่เหมาะสม:
+        // ค้นหาแมตช์ที่ไม่ได้เป็นแมตช์ปัจจุบัน, มีสถานะ "waiting",
+        // และมีทีม A หรือ ทีม B ว่างอยู่ (length === 0)
+        // การใช้ find() กับ array ที่เรียงตาม createdAt descending จะทำให้ได้แมตช์ใหม่ที่สุดที่ตรงเงื่อนไขก่อน
+        const suitableMatch = matches.find(
+            m =>
+                m.id !== fromMatch.id &&
+                m.status === "waiting" &&
+                ( (m.teamA || []).length === 0 || (m.teamB || []).length === 0 )
         );
-        if (currentMatchIndex === -1) return;
 
-        const nextWaitingMatchIndex = matches.findIndex(
-          (m, idx) =>
-            idx > currentMatchIndex &&
-            m.status === "waiting" &&
-            ((m.teamA || []).length < 2 || (m.teamB || []).length < 2)
-        );
+        let finalNextMatch = suitableMatch;
+        let targetMatchDisplayNumber; // หมายเลขแมตช์สำหรับแสดงในข้อความยืนยัน
 
-        let nextMatch = null;
-        let targetMatchNumber = matches.length + 1;
+        if (finalNextMatch) {
+            // คำนวณหมายเลขแมตช์ที่จะแสดง (ตาม lógica การแสดงผล overallIndex)
+            const nextMatchActualIndex = matches.findIndex(m => m.id === finalNextMatch.id);
+            // overallIndex = matches.length - index (เนื่องจาก matches เรียงจากใหม่ไปเก่า)
+            targetMatchDisplayNumber = matches.length - nextMatchActualIndex;
+        }
+        
+        const playerNamesOfWinnerTeam = winnerTeam.map(p => p.name).join(', ');
+        const confirmMsg = `ส่งทีมชนะ (${playerNamesOfWinnerTeam}) ไป${finalNextMatch ? `แมตช์ที่ ${targetMatchDisplayNumber}` : "สร้างแมตช์ใหม่"}?`;
 
-        if (nextWaitingMatchIndex !== -1) {
-          nextMatch = matches[nextWaitingMatchIndex];
-          targetMatchNumber = matches.length - nextWaitingMatchIndex;
+        if (!confirm(confirmMsg)) {
+          return;
         }
 
-        const confirmMove = confirm(
-          `ส่งทีมชนะไปแมต ${nextMatch ? `ที่ ${targetMatchNumber}` : "ใหม่"}?`
-        );
-        if (!confirmMove) return;
-
-        if (!nextMatch) {
-          const allPlayerNames = [...winnerTeam.map((p) => p.name)].filter(
-            Boolean
-          );
+        if (!finalNextMatch) {
+          // ถ้าไม่พบแมตช์ที่รอเล่นและมีช่องว่างอยู่ ให้สร้างแมตช์ใหม่
+          const allPlayerNames = [...winnerTeam.map((p) => p.name)].filter(Boolean);
           await addDoc(collection(db, "matches"), {
-            teamA: winnerTeam,
-            teamB: [],
+            teamA: winnerTeam, // ทีมชนะจะอยู่ในทีม A ของแมตช์ใหม่
+            teamB: [],         // ทีม B จะว่างรอผู้ท้าชิง
             playerNames: allPlayerNames,
             winner: "",
             status: "waiting",
             createdAt: serverTimestamp(),
           });
-          alert(`สร้างแมตใหม่เรียบร้อย`);
+          alert(`สร้างแมตช์ใหม่สำหรับทีม '${playerNamesOfWinnerTeam}' เรียบร้อย`);
         } else {
-          const nextMatchRef = doc(db, "matches", nextMatch.id);
-          const currentTeamA = nextMatch.teamA || [];
-          const currentTeamB = nextMatch.teamB || [];
+          // ถ้าพบแมตช์ที่เหมาะสม (finalNextMatch) ให้อัปเดตแมตช์นั้น
+          const nextMatchRef = doc(db, "matches", finalNextMatch.id);
+          const currentTeamA = finalNextMatch.teamA || [];
+          const currentTeamB = finalNextMatch.teamB || [];
           let updateData = {};
-          let targetTeam = "";
-          if (currentTeamA.length < 2) {
-            updateData.teamA = [...currentTeamA, ...winnerTeam];
-            targetTeam = "A";
-          } else if (currentTeamB.length < 2) {
-            updateData.teamB = [...currentTeamB, ...winnerTeam];
-            targetTeam = "B";
+          let assignedTeamLetter = "";
+
+          // ใส่ทีมชนะเข้าไปในทีมที่ว่างอยู่
+          if (currentTeamA.length === 0) {
+            updateData.teamA = winnerTeam;
+            updateData.teamB = currentTeamB; // คงทีม B เดิมไว้ (ถ้ามี)
+            assignedTeamLetter = "A";
+          } else if (currentTeamB.length === 0) {
+            updateData.teamB = winnerTeam;
+            updateData.teamA = currentTeamA; // คงทีม A เดิมไว้ (ถ้ามี)
+            assignedTeamLetter = "B";
           } else {
-            alert(`แมต ${targetMatchNumber} เต็ม`);
+            // กรณีนี้ไม่ควรเกิดขึ้นถ้า suitableMatch ถูกเลือกมาอย่างถูกต้อง
+            alert("เกิดข้อผิดพลาด: ไม่พบช่องว่างในทีมของแมตช์ที่เลือก");
             return;
           }
-          const finalTeamA = updateData.teamA || currentTeamA;
-          const finalTeamB = updateData.teamB || currentTeamB;
+
+          const finalTeamAForUpdate = updateData.teamA; //ทีม A ที่จะอัปเดต
+          const finalTeamBForUpdate = updateData.teamB; //ทีม B ที่จะอัปเดต
+
           updateData.playerNames = [
-            ...finalTeamA.map((p) => p.name),
-            ...finalTeamB.map((p) => p.name),
+            ...(finalTeamAForUpdate || []).map((p) => p.name),
+            ...(finalTeamBForUpdate || []).map((p) => p.name),
           ].filter(Boolean);
-          updateData.status = "waiting";
-          updateData.winner = "";
+          // status และ winner ของ finalNextMatch ไม่ต้องเปลี่ยน (ยังคง waiting และ winner="")
+
           await updateDoc(nextMatchRef, updateData);
           alert(
-            `ส่งทีมชนะไปทีม ${targetTeam} ของแมต ${targetMatchNumber} แล้ว`
+            `ส่งทีมชนะ (${playerNamesOfWinnerTeam}) ไปยังทีม ${assignedTeamLetter} ของแมตช์ที่ ${targetMatchDisplayNumber} เรียบร้อยแล้ว`
           );
         }
       } catch (err) {
         console.error("❌ Error sending winner:", err);
-        alert("เกิดข้อผิดพลาด");
+        alert("เกิดข้อผิดพลาดในการส่งผู้ชนะ: " + err.message);
       }
     },
-    [matches]
+    [matches, db] // เพิ่ม db หากใช้งานตรงๆ หรือพิจารณา dependencies อื่นๆ ที่จำเป็น
   );
 
   // --- ฟังก์ชันอัปเดต playerNames ---
@@ -1164,108 +1180,195 @@ export default function AdminPage() {
       {/* แสดงแมตช์ */}
       <div id="popup-anchor" className="h-1"></div>
       <div className="max-w-5xl mx-auto w-full">
-        {/* Popup เพิ่มผู้เล่น */}
-        {addingPlayerMatchId && (
-          <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-60 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-2xl p-4 md:p-6 max-w-4xl w-full max-h-[85vh] overflow-y-auto shadow-2xl transform transition-transform duration-300 scale-100 animate-popup">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg md:text-xl font-bold text-center text-yellow-700 flex-1">
-                  ➕ เพิ่ม/ย้ายผู้เล่นในแมตช์
-                </h2>
-                <button
-                  onClick={() => setAddingPlayerMatchId(null)}
-                  className="text-gray-500 hover:text-red-600 text-2xl"
-                >
-                  &times;
-                </button>
-              </div>
-              <div className="mb-4">
-                <input
-                  type="text"
-                  placeholder="🔍 ค้นหาผู้เล่น..."
-                  // ใช้ state แยกสำหรับ popup search หรือใช้ searchTodayTerm ก็ได้
-                  onChange={(e) => setSearchTodayTerm(e.target.value)}
-                  className="border px-3 py-1.5 rounded-md text-sm w-full shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                />
-              </div>
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3 md:gap-4">
-                {selectedPlayersToday
-                  .filter((player) =>
-                    player?.name
-                      ?.toLowerCase()
-                      .includes(searchTodayTerm.toLowerCase())
-                  )
-                  .map((playerToday) => {
-                    const fullPlayer = players.find(
-                      (p) => p.id === playerToday.id
-                    );
-                    if (!fullPlayer) return null;
-                    const isSelected =
-                      selectedPlayerToAdd?.id === fullPlayer.id;
-                    return (
-                      <div
-                        key={fullPlayer.id}
-                        className="flex flex-col items-center w-full"
-                      >
-                        <div
-                          onClick={() => setSelectedPlayerToAdd(fullPlayer)}
-                          className={`cursor-pointer hover:scale-105 transition-all p-1 rounded-lg ${
-                            isSelected ? "ring-2 ring-green-400" : ""
-                          }`}
-                        >
-                          <img
-                            src={fullPlayer.image || "/default-avatar.png"}
-                            loading="lazy"
-                            alt={fullPlayer.name}
-                            className="w-14 h-14 rounded-full object-cover shadow-lg border border-gray-200"
-                          />
-                          <p className="text-xs font-medium mt-1 text-center truncate w-full px-1">
-                            {fullPlayer.name}
-                          </p>
-                        </div>
-                        {isSelected && (
-                          <div className="flex flex-col sm:flex-row flex-wrap gap-1 mt-1.5 justify-center items-center w-full">
-                            <button
-                              onClick={() =>
-                                handleAddPlayerToMatch(fullPlayer, "A")
-                              }
-                              className="flex-1 min-w-[50px] h-6 bg-blue-500 hover:bg-blue-600 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1"
-                            >
-                              ทีม A
-                            </button>
-                            <button
-                              onClick={() =>
-                                handleAddPlayerToMatch(fullPlayer, "B")
-                              }
-                              className="flex-1 min-w-[50px] h-6 bg-yellow-500 hover:bg-yellow-600 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1"
-                            >
-                              ทีม B
-                            </button>
-                            <button
-                              onClick={() =>
-                                handleRemovePlayerFromMatch(fullPlayer)
-                              }
-                              className="flex-1 min-w-[50px] h-6 bg-red-500 hover:bg-red-600 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1"
-                              title={`ลบ ${fullPlayer.name}`}
-                            >
-                              ลบออก
-                            </button>
-                            <button
-                              onClick={() => setSelectedPlayerToAdd(null)}
-                              className="flex-1 min-w-[50px] h-6 bg-gray-400 hover:bg-gray-500 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1"
-                              title="ยกเลิก"
-                            >
-                              ยกเลิก
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-              </div>
+{addingPlayerMatchId && (() => { // ใช้ IIFE เพื่อให้สามารถประกาศตัวแปร local ได้ง่ายขึ้น
+  // 1. ดึงข้อมูลทีมปัจจุบันของแมตช์ที่กำลังแก้ไข
+  const currentMatchForPopup = matches.find(match => match.id === addingPlayerMatchId);
+  const teamAPlayers = currentMatchForPopup?.teamA || [];
+  const teamBPlayers = currentMatchForPopup?.teamB || [];
+
+  // ฟังก์ชันเล็กๆ สำหรับแสดงผู้เล่นในทีม (ใช้ซ้ำได้)
+  const renderTeamPlayers = (teamPlayers, teamName, teamColorClass) => (
+    <div className="mb-3">
+      <h3 className={`text-md font-semibold mb-1.5 ${teamColorClass}`}>
+        {teamName} ({teamPlayers.length}/2)
+      </h3>
+      {teamPlayers.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {teamPlayers.map(p => (
+            <div key={p.id} className="flex flex-col items-center text-center w-16">
+              <img
+                src={p.image || "/default-avatar.png"}
+                alt={p.name}
+                className="w-10 h-10 rounded-full object-cover border-2 border-gray-300"
+              />
+              <p className="text-xs mt-0.5 truncate w-full">{p.name}</p>
             </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 italic">ยังไม่มีผู้เล่นในทีม {teamName}</p>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-50 bg-transparent backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl p-4 md:p-6 max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl transform transition-transform duration-300 scale-100 animate-popup">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-lg md:text-xl font-bold text-gray-700 flex-1">
+            ➕ เพิ่ม/ย้ายผู้เล่นในแมตช์
+          </h2>
+          <button
+            onClick={() => {
+              setAddingPlayerMatchId(null);
+              setSelectedPlayerToAdd(null); // Clear selection when closing popup
+            }}
+            className="text-gray-500 hover:text-red-600 text-2xl p-1"
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* ---- ส่วนแสดงทีม A และ B ด้านบน ---- */}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-4 border-b pb-3">
+          {renderTeamPlayers(teamAPlayers, "ทีม A", "text-blue-600")}
+          {renderTeamPlayers(teamBPlayers, "ทีม B", "text-yellow-600")}
+        </div>
+        {/* ---- จบส่วนแสดงทีม A และ B ---- */}
+
+        <div className="mb-3">
+          <input
+            type="text"
+            placeholder="🔍 ค้นหาผู้เล่นที่จะเพิ่ม/ย้าย..."
+            value={searchTodayTerm} // ใช้ searchTodayTerm ที่มีอยู่ หรือจะสร้าง state ใหม่สำหรับ popup ก็ได้
+            onChange={(e) => setSearchTodayTerm(e.target.value)}
+            className="border px-3 py-1.5 rounded-md text-sm w-full shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+          />
+        </div>
+
+        {/* ส่วนแสดงรายชื่อผู้เล่นที่เลือกได้ (Scrollable) */}
+        <div className="overflow-y-auto flex-grow pr-1">
+          <div className="grid grid-cols-5 gap-3 md:gap-4">
+            {selectedPlayersToday
+              .filter((player) =>
+                player?.name
+                  ?.toLowerCase()
+                  .includes(searchTodayTerm.toLowerCase())
+              )
+              .map((playerToday) => {
+                const fullPlayer = players.find(
+                  (p) => p.id === playerToday.id
+                );
+                if (!fullPlayer) return null;
+
+                const isSelectedInList = selectedPlayerToAdd?.id === fullPlayer.id;
+                const isInTeamA = teamAPlayers.some(p => p.id === fullPlayer.id);
+                const isInTeamB = teamBPlayers.some(p => p.id === fullPlayer.id);
+                const alreadyInThisMatch = isInTeamA || isInTeamB;
+
+                return (
+                  <div
+                    key={fullPlayer.id}
+                    className="flex flex-col items-center w-full"
+                  >
+                    <div
+                      onClick={() => {
+                        // ถ้าผู้เล่นยังไม่ได้อยู่ในแมตช์นี้ ให้เลือกเพื่อแสดงปุ่ม
+                        // ถ้าอยู่ในแมตช์แล้ว อาจจะให้คลิกเพื่อเตรียมย้ายทีม (ถ้าต้องการ) หรือแค่แสดงข้อมูล
+                        if (!alreadyInThisMatch) {
+                           setSelectedPlayerToAdd(fullPlayer);
+                        } else {
+                           // อาจจะ alert ว่าผู้เล่นอยู่ในทีมแล้ว หรือเตรียม action อื่น
+                           setSelectedPlayerToAdd(fullPlayer); // เลือกเพื่อให้ปุ่ม "ลบออก" หรือ "ย้าย" แสดง
+                        }
+                      }}
+                      className={`cursor-pointer hover:scale-105 transition-all p-1 rounded-lg w-full
+                        ${isSelectedInList ? "ring-2 ring-green-400 shadow-md" : ""}
+                        ${alreadyInThisMatch ? "bg-gray-100 opacity-60" : "hover:bg-gray-50"}`}
+                    >
+                      <img
+                        src={fullPlayer.image || "/default-avatar.png"}
+                        loading="lazy"
+                        alt={fullPlayer.name}
+                        className="w-14 h-14 rounded-full object-cover shadow-lg border border-gray-200 mx-auto"
+                      />
+                      <p className="text-xs font-medium mt-1 text-center truncate w-full px-1">
+                        {fullPlayer.name}
+                        {isInTeamA && <span className="block text-[10px] text-blue-500">(ทีม A)</span>}
+                        {isInTeamB && <span className="block text-[10px] text-yellow-500">(ทีม B)</span>}
+                      </p>
+                    </div>
+                    {isSelectedInList && (
+  <div className="flex flex-col gap-1 mt-1.5 justify-center items-center w-full">
+    {/* ปุ่ม ไปทีม A (แสดงเมื่อผู้เล่นยังไม่ได้อยู่ทีมไหนเลย และทีม A ยังไม่เต็ม) */}
+    {!isInTeamA && !isInTeamB && teamAPlayers.length < 2 && (
+      <button
+        onClick={() => handleAddPlayerToMatch(fullPlayer, "A")}
+        className="w-full h-6 bg-blue-500 hover:bg-blue-600 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1"
+      >
+        ไปทีม A
+      </button>
+    )}
+
+    {/* ปุ่ม ไปทีม B (แสดงเมื่อผู้เล่นยังไม่ได้อยู่ทีมไหนเลย และทีม B ยังไม่เต็ม) */}
+    {!isInTeamA && !isInTeamB && teamBPlayers.length < 2 && (
+      <button
+        onClick={() => handleAddPlayerToMatch(fullPlayer, "B")}
+        className="w-full h-6 bg-yellow-500 hover:bg-yellow-600 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1"
+      >
+        ไปทีม B
+      </button>
+    )}
+
+    {/* ปุ่ม ลบออกจากแมตช์ (แสดงเมื่อผู้เล่นอยู่ในทีมใดทีมหนึ่งแล้ว) */}
+    {alreadyInThisMatch && (
+       <button
+         onClick={() => handleRemovePlayerFromMatch(fullPlayer)}
+         className="w-full h-6 bg-red-500 hover:bg-red-600 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1"
+         title={`ลบ ${fullPlayer.name} ออกจากแมตช์`}
+       >
+         ลบออก
+       </button>
+    )}
+
+    {/* ปุ่ม ย้ายไปทีม A (แสดงเมื่อผู้เล่นอยู่ทีม B และทีม A ยังไม่เต็ม) */}
+    {isInTeamB && teamAPlayers.length < 2 && (
+        <button
+            onClick={() => handleAddPlayerToMatch(fullPlayer, "A")}
+            className="w-full h-6 bg-blue-400 hover:bg-blue-500 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1"
+        >
+            ย้ายไป A
+        </button>
+    )}
+
+    {/* ปุ่ม ย้ายไปทีม B (แสดงเมื่อผู้เล่นอยู่ทีม A และทีม B ยังไม่เต็ม) */}
+    {isInTeamA && teamBPlayers.length < 2 && (
+        <button
+            onClick={() => handleAddPlayerToMatch(fullPlayer, "B")}
+            className="w-full h-6 bg-yellow-400 hover:bg-yellow-500 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1"
+        >
+            ย้ายไป B
+        </button>
+    )}
+
+    <button
+      onClick={() => setSelectedPlayerToAdd(null)}
+      className="w-full h-6 bg-gray-400 hover:bg-gray-500 text-white text-[10px] font-semibold rounded flex items-center justify-center px-1 mt-1"
+      title="ยกเลิกการเลือก"
+    >
+      ยกเลิก
+    </button>
+  </div>
+)}
+                  </div>
+                );
+              })}
           </div>
-        )}
+        </div>
+      </div>
+    </div>
+  );
+})()}
 
         {/* Match List */}
         {matches.length === 0 && !loading && (

@@ -190,7 +190,7 @@ function H2HContent() {
        </div>
 
       <h1 className="text-3xl font-bold text-purple-800 mb-6">
-        Head-to-Head Comparison
+        Head-to-Head
       </h1>
 
       {/* ส่วนแสดงผล H2H */}
