@@ -487,7 +487,7 @@ export default function UserPage() {
 
       {/* เวอร์ชัน */}
       <div className="w-full text-end pr-4 mt-2 text-gray-400 text-[10px]">
-        อัปเดตล่าสุด 6/5/2025 อุอิ
+       อุอิอา อัปเดตล่าสุด 6/5/2025
       </div>
     </main>
   );
