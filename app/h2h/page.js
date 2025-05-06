@@ -217,7 +217,7 @@ function H2HContent() {
             <span className="text-red-600">{player2Wins}</span>
           </p>
           <p className="text-sm text-gray-500 mt-1">
-            (เจอกัน {h2hMatches.length} ครั้ง)
+           เจอกัน {h2hMatches.length}
           </p>
         </div>
 
