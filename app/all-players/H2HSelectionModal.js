@@ -73,7 +73,7 @@ export default function H2HSelectionModal({ isOpen, onClose, players = [], onSel
         </div>
 
         {/* Player selection section */}
-        <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto pr-2 custom-scrollbar">
+        <div className="flex-grow grid grid-cols-2 gap-6 overflow-y-auto pr-2 custom-scrollbar">
           {/* Player 1 Column */}
           <PlayerSelectionColumn
             playerId="1"
